@@ -71,6 +71,7 @@ export const useBeverageStore = defineStore("BeverageStore", {
         .catch((error: any) => {
           console.error("Error getting documents:", error);
         });
+
       const syrupCollection = collection(db, "syrups");
       getDocs(syrupCollection)
         .then((qs: QuerySnapshot) => {
@@ -139,13 +140,120 @@ export const useBeverageStore = defineStore("BeverageStore", {
       this.currentSyrup = this.currentBeverage.syrup;
       this.currentCreamer = this.currentBeverage.creamer;
       console.log(
-        `currentBeverage changed`,
+        "currentBeverage changed",
         this.currentBase,
         this.currentCreamer,
         this.currentSyrup
       );
     },
-    makeBeverage() {},
-    setUser(user: User | null) {},
+
+    makeBeverage() {
+      // 1. Make sure a user is logged in
+      if (!this.user) {
+        return "No user logged in, please sign in first.";
+      }
+
+      // 2. Make sure all options + name are set
+      if (
+        !this.currentName.trim() ||
+        !this.currentBase ||
+        !this.currentSyrup ||
+        !this.currentCreamer ||
+        !this.currentTemp
+      ) {
+        return "Please complete all beverage options and the name before making a beverage.";
+      }
+
+      // 3. Build a unique beverage id
+      const id = `${this.user.uid}-${Date.now()}`;
+
+      const newBeverage: BeverageType = {
+        id,
+        uid: this.user.uid,
+        name: this.currentName.trim(),
+        temp: this.currentTemp,
+        base: this.currentBase,
+        syrup: this.currentSyrup,
+        creamer: this.currentCreamer,
+      };
+
+      // 4. Optimistically update store so UI responds right away
+      this.beverages.push(newBeverage);
+      this.currentBeverage = newBeverage;
+
+      // 5. Write to Firestore
+      const beveragesRef = collection(db, "beverages");
+      const beverageDoc = doc(beveragesRef, id);
+
+      setDoc(beverageDoc, newBeverage).catch((error: any) => {
+        console.error("Error writing beverage document:", error);
+      });
+
+      return `Beverage ${newBeverage.name} made successfully!`;
+    },
+
+    setUser(user: User | null) {
+      console.log("setUser called with:", user);
+
+      // Save the user in the store
+      this.user = user;
+
+      // Stop previous Firestore listener if it exists
+      if (this.snapshotUnsubscribe) {
+        this.snapshotUnsubscribe();
+        this.snapshotUnsubscribe = null;
+      }
+
+      // If no user, clear beverages & current beverage
+      if (!user) {
+        this.beverages = [];
+        this.currentBeverage = null;
+        return;
+      }
+
+      // Start a new listener for this user's beverages
+      const beveragesRef = collection(db, "beverages");
+      const qUserBeverages = query(
+        beveragesRef,
+        where("uid", "==", user.uid)
+      );
+
+      this.snapshotUnsubscribe = onSnapshot(
+        qUserBeverages,
+        (qs: QuerySnapshot) => {
+          this.beverages = qs.docs.map((qd: QueryDocumentSnapshot) => {
+            const data = qd.data();
+            return {
+              id: qd.id,
+              uid: data.uid,
+              name: data.name,
+              temp: data.temp,
+              base: data.base,
+              syrup: data.syrup,
+              creamer: data.creamer,
+            } as BeverageType;
+          });
+
+          if (this.beverages.length === 0) {
+            this.currentBeverage = null;
+            return;
+          }
+
+          if (this.currentBeverage) {
+            const match = this.beverages.find(
+              (b) => b.id === this.currentBeverage!.id
+            );
+            this.currentBeverage = match ?? this.beverages[0];
+          } else {
+            this.currentBeverage = this.beverages[0];
+          }
+
+          this.showBeverage();
+        },
+        (error) => {
+          console.error("Error listening for beverages:", error);
+        }
+      );
+    },
   },
 });
