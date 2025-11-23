@@ -1,7 +1,9 @@
 <template>
   <div>
+    <!-- Beverage preview -->
     <Beverage :isIced="beverageStore.currentTemp === 'Cold'" />
 
+    <!-- Temperature selection -->
     <ul>
       <li>
         <template v-for="temp in beverageStore.temps" :key="temp">
@@ -19,6 +21,7 @@
       </li>
     </ul>
 
+    <!-- Base selection -->
     <ul>
       <li>
         <template v-for="b in beverageStore.bases" :key="b.id">
@@ -36,6 +39,7 @@
       </li>
     </ul>
 
+    <!-- Syrup selection -->
     <ul>
       <li>
         <template v-for="s in beverageStore.syrups" :key="s.id">
@@ -53,6 +57,7 @@
       </li>
     </ul>
 
+    <!-- Creamer selection -->
     <ul>
       <li>
         <template v-for="c in beverageStore.creamers" :key="c.id">
@@ -70,40 +75,88 @@
       </li>
     </ul>
 
+    <!-- Auth row -->
     <div class="auth-row">
-      <button @click="withGoogle">Sign in with Google</button>
+      <!-- Before user signs in -->
+      <button v-if="!beverageStore.user" @click="withGoogle">
+        Sign in with Google
+      </button>
+
+      <!-- After user signs in -->
+      <div v-else>
+        <span class="user-label">
+          Signed in as
+          {{
+            beverageStore.user.displayName || beverageStore.user.email
+          }}
+        </span>
+        <button @click="handleSignOut">Sign out</button>
+      </div>
     </div>
+
+    <p class="hint" v-if="!beverageStore.user">
+      Please sign in with Google to make and view your saved beverages.
+    </p>
+
+    <!-- Beverage name input -->
     <input
       v-model="beverageStore.currentName"
       type="text"
       placeholder="Beverage Name"
     />
 
-    <button @click="handleMakeBeverage">🍺 Make Beverage</button>
+    <!-- Make Beverage button (disabled when logged out) -->
+    <button
+      @click="handleMakeBeverage"
+      :disabled="!beverageStore.user"
+    >
+      🍺 Make Beverage
+    </button>
 
+    <!-- Status / error messages -->
     <p v-if="message" class="status-message">
       {{ message }}
     </p>
   </div>
 
+  <!-- Saved beverages list -->
   <div style="margin-top: 20px">
-    <template v-for="beverage in beverageStore.beverages" :key="beverage.id">
-      <input
-        type="radio"
-        :id="beverage.id"
-        :value="beverage"
-        v-model="beverageStore.currentBeverage"
-        @change="beverageStore.showBeverage()"
-      />
-      <label :for="beverage.id">{{ beverage.name }}</label>
-    </template>
+    <div
+      v-if="beverageStore.user && beverageStore.beverages.length > 0"
+    >
+      <p>Saved beverages:</p>
+      <template
+        v-for="beverage in beverageStore.beverages"
+        :key="beverage.id"
+      >
+        <input
+          type="radio"
+          :id="beverage.id"
+          :value="beverage"
+          v-model="beverageStore.currentBeverage"
+          @change="beverageStore.showBeverage()"
+        />
+        <label :for="beverage.id">{{ beverage.name }}</label>
+      </template>
+    </div>
+
+    <p v-else-if="beverageStore.user">
+      No saved beverages yet. Make one to see it here!
+    </p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onMounted } from "vue";
 import Beverage from "./components/Beverage.vue";
 import { useBeverageStore } from "./stores/beverageStore";
+
+import { auth, googleProvider } from "./firebase";
+import {
+  onAuthStateChanged,
+  signInWithPopup,
+  signOut,
+} from "firebase/auth";
 
 const beverageStore = useBeverageStore();
 beverageStore.init();
@@ -117,7 +170,36 @@ const showMessage = (txt: string) => {
   }, 5000);
 };
 
-const withGoogle = async () => {};
+// Listen for login/logout changes from Firebase Auth
+onMounted(() => {
+  onAuthStateChanged(auth, (user) => {
+    beverageStore.setUser(user);
+  });
+});
+
+const withGoogle = async () => {
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+
+    beverageStore.setUser(result.user);
+
+    showMessage("Signed in successfully!");
+  } catch (err: any) {
+    console.error("Google sign-in error:", err);
+    showMessage("Error signing in with Google. Please try again.");
+  }
+};
+
+
+const handleSignOut = async () => {
+  try {
+    await signOut(auth);
+    showMessage("Signed out.");
+  } catch (err: any) {
+    console.error("Sign-out error:", err);
+    showMessage("Error signing out. Please try again.");
+  }
+};
 
 const handleMakeBeverage = () => {
   const txt = beverageStore.makeBeverage();
